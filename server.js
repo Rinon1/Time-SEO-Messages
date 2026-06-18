@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const P = require('pino');
 const { ViberBot, normalizeNumber } = require('./viber-automation');
@@ -52,14 +52,14 @@ async function initWhatsApp() {
 
   try {
     const { state, saveCreds } = await useMultiFileAuthState('.wa_session');
+    const { version } = await fetchLatestBaileysVersion();
+    log(`WhatsApp: using version ${version.join('.')}`);
 
     waSocket = makeWASocket({
+      version,
       auth: state,
       printQRInTerminal: false,
       logger: P({ level: 'silent' }),
-      browser: ['Auto Messenger', 'Chrome', '1.0.0'],
-      connectTimeoutMs: 60000,
-      retryRequestDelayMs: 500,
     });
 
     waSocket.ev.on('connection.update', async (update) => {
@@ -73,13 +73,14 @@ async function initWhatsApp() {
 
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const reason = lastDisconnect?.error?.message || '';
         if (statusCode === DisconnectReason.loggedOut) {
           waReady = false;
           log('WhatsApp: logged out — reconnect to scan again', 'warn');
           broadcast({ type: 'wa_disconnected' });
         } else {
-          log('WhatsApp: connection closed, retrying...', 'warn');
-          setTimeout(() => initWhatsApp(), 4000);
+          log(`WhatsApp: connection closed (code ${statusCode || '?'}) — retrying in 5s...`, 'warn');
+          setTimeout(() => initWhatsApp(), 5000);
         }
       } else if (connection === 'open') {
         waReady = true;

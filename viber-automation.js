@@ -18,17 +18,14 @@ class ViberBot {
 
   async init() {
     const isCloud = !!process.env.PORT;
+    const args = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1100,750'];
+    if (isCloud) {
+      args.push('--disable-dev-shm-usage', '--disable-gpu', '--single-process');
+    }
     this.browser = await puppeteer.launch({
       executablePath: CHROME_PATH,
       headless: isCloud ? 'new' : false,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--single-process',
-        '--window-size=1100,750',
-      ],
+      args,
       defaultViewport: { width: 1100, height: 750 },
     });
 
