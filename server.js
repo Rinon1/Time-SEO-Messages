@@ -326,6 +326,13 @@ wss.on('connection', (ws) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled error (server kept running):', err?.message || err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception (server kept running):', err?.message || err);
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n Auto-Messenger running at http://localhost:${PORT}\n`);
