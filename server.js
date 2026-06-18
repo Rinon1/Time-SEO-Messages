@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
+const fs = require('fs');
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const P = require('pino');
@@ -329,4 +330,10 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n Auto-Messenger running at http://localhost:${PORT}\n`);
   console.log(' Open that URL in your browser to get started.\n');
+
+  // Auto-reconnect WhatsApp if a saved session exists
+  if (fs.existsSync('.wa_session')) {
+    console.log(' Saved WhatsApp session found — reconnecting automatically...');
+    initWhatsApp();
+  }
 });

@@ -1,3 +1,20 @@
+// ─── Persistence ─────────────────────────────────────────────────────────────
+function saveField(key, value) { try { localStorage.setItem(key, value); } catch {} }
+function loadField(key) { try { return localStorage.getItem(key) || ''; } catch { return ''; } }
+
+window.addEventListener('DOMContentLoaded', () => {
+  const msg = loadField('am_message');
+  const contacts = loadField('am_contacts');
+  const delay = loadField('am_delay');
+  if (msg)      document.getElementById('message-input').value = msg;
+  if (contacts) document.getElementById('numbers-input').value = contacts;
+  if (delay)    document.getElementById('delay-input').value = delay;
+
+  document.getElementById('message-input').addEventListener('input', e => saveField('am_message', e.target.value));
+  document.getElementById('numbers-input').addEventListener('input', e => saveField('am_contacts', e.target.value));
+  document.getElementById('delay-input').addEventListener('input', e => saveField('am_delay', e.target.value));
+});
+
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${wsProtocol}//${location.host}`);
