@@ -1,5 +1,8 @@
 const puppeteer = require('puppeteer');
 
+let CHROME_PATH;
+try { CHROME_PATH = puppeteer.executablePath(); } catch (e) { CHROME_PATH = undefined; }
+
 class ViberBot {
   constructor({ onQR, onReady, onLog, onDisconnected }) {
     this.browser = null;
@@ -16,12 +19,14 @@ class ViberBot {
   async init() {
     const isCloud = !!process.env.PORT;
     this.browser = await puppeteer.launch({
+      executablePath: CHROME_PATH,
       headless: isCloud ? 'new' : false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
+        '--single-process',
         '--window-size=1100,750',
       ],
       defaultViewport: { width: 1100, height: 750 },

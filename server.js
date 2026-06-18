@@ -4,7 +4,16 @@ const WebSocket = require('ws');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const path = require('path');
+const puppeteer = require('puppeteer');
 const { ViberBot, normalizeNumber } = require('./viber-automation');
+
+// Resolve the Chrome binary path from our puppeteer install
+let CHROME_PATH;
+try {
+  CHROME_PATH = puppeteer.executablePath();
+} catch (e) {
+  CHROME_PATH = undefined;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -50,8 +59,9 @@ function initWhatsApp() {
   waClient = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wa_session' }),
     puppeteer: {
+      executablePath: CHROME_PATH,
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process'],
     },
   });
 
