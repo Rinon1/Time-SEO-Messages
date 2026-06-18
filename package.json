@@ -1,0 +1,16 @@
+{
+  "name": "auto-messenger",
+  "version": "1.0.0",
+  "description": "Auto-send messages via Viber and WhatsApp without any API key",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode": "^1.5.3",
+    "ws": "^8.16.0",
+    "puppeteer": "^21.0.0"
+  }
+}

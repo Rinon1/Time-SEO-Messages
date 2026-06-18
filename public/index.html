@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto Messenger</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Auto Messenger</h1>
+      <p class="subtitle">Send messages automatically via Viber &amp; WhatsApp</p>
+    </header>
+
+    <!-- Connection Cards -->
+    <section class="connections">
+      <!-- Viber -->
+      <div class="card" id="viber-card">
+        <div class="card-header">
+          <div class="platform-icon viber-icon">V</div>
+          <div>
+            <div class="platform-name">Viber</div>
+            <div class="status-badge" id="viber-status">Not connected</div>
+          </div>
+          <button class="connect-btn" id="viber-connect-btn" onclick="connectViber()">Connect</button>
+        </div>
+        <div class="qr-area" id="viber-qr-area" style="display:none">
+          <p class="qr-hint">Open Viber on your phone → More → Viber for Web → Scan this code</p>
+          <img id="viber-qr-img" src="" alt="Viber QR" />
+          <p class="qr-refresh">Screenshot updates every few seconds</p>
+        </div>
+      </div>
+
+      <!-- WhatsApp -->
+      <div class="card" id="wa-card">
+        <div class="card-header">
+          <div class="platform-icon wa-icon">W</div>
+          <div>
+            <div class="platform-name">WhatsApp</div>
+            <div class="status-badge" id="wa-status">Not connected</div>
+          </div>
+          <button class="connect-btn" id="wa-connect-btn" onclick="connectWhatsApp()">Connect</button>
+        </div>
+        <div class="qr-area" id="wa-qr-area" style="display:none">
+          <p class="qr-hint">Open WhatsApp on your phone → Linked Devices → Link a Device → Scan</p>
+          <img id="wa-qr-img" src="" alt="WhatsApp QR" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Compose Section -->
+    <section class="card compose-section">
+      <h2>Message Settings</h2>
+
+      <div class="form-group">
+        <label>Phone Numbers <span class="hint">(one per line, include country code e.g. +38591...)</span></label>
+        <textarea id="numbers-input" placeholder="+38591234567&#10;+385921234567&#10;+385911234567" rows="6"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="message-input" placeholder="Type your message here..." rows="4"></textarea>
+      </div>
+
+      <div class="form-group row">
+        <label>Delay between messages</label>
+        <div class="delay-control">
+          <input type="number" id="delay-input" value="10" min="5" max="300" />
+          <span>seconds</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="priority-note">
+          Priority: <strong>Viber first</strong> → WhatsApp fallback → Skip if neither
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-start" id="start-btn" onclick="startSending()">Start Sending</button>
+        <button class="btn-stop" id="stop-btn" onclick="stopSending()" style="display:none">Stop</button>
+      </div>
+    </section>
+
+    <!-- Progress -->
+    <section class="card progress-section" id="progress-section" style="display:none">
+      <h2>Progress</h2>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+      </div>
+      <div class="progress-text" id="progress-text">0 / 0</div>
+      <div class="next-timer" id="next-timer"></div>
+
+      <div class="results-grid" id="results-grid"></div>
+    </section>
+
+    <!-- Log -->
+    <section class="card log-section">
+      <div class="log-header">
+        <h2>Activity Log</h2>
+        <button class="btn-clear" onclick="clearLog()">Clear</button>
+      </div>
+      <div class="log-box" id="log-box"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
