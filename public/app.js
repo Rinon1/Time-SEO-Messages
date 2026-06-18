@@ -13,6 +13,16 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('message-input').addEventListener('input', e => saveField('am_message', e.target.value));
   document.getElementById('numbers-input').addEventListener('input', e => saveField('am_contacts', e.target.value));
   document.getElementById('delay-input').addEventListener('input', e => saveField('am_delay', e.target.value));
+
+  // Auto-clean pasted contacts (tab-separated, spaces in numbers, missing + etc.)
+  document.getElementById('numbers-input').addEventListener('paste', () => {
+    setTimeout(() => {
+      const el = document.getElementById('numbers-input');
+      const cleaned = el.value.split('\n').map(normalizeLine).filter(Boolean).join('\n');
+      el.value = cleaned;
+      saveField('am_contacts', cleaned);
+    }, 20);
+  });
 });
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -135,19 +145,48 @@ function connectViber() {
   document.getElementById('viber-connect-btn').disabled = true;
 }
 
+// Normalize a single contact line into "Business Name, +NUMBER" format.
+// Handles: tab-separated, comma-separated, number-only, spaces in number, missing + prefix.
+function normalizeLine(line) {
+  line = line.trim();
+  if (!line) return null;
+
+  let name = '', rawNumber = '';
+
+  if (line.includes('\t')) {
+    // Tab-separated: "Business Name\t383 44 119 538"
+    const tabIdx = line.lastIndexOf('\t');
+    name = line.slice(0, tabIdx).trim();
+    rawNumber = line.slice(tabIdx + 1).trim();
+  } else {
+    // Comma / space separated — detect number by position
+    const match = line.match(/^(.*?)(\+?\d[\d\s\-().]{5,}\d)$/);
+    if (match) {
+      name = match[1].replace(/[,\s]+$/, '').trim();
+      rawNumber = match[2];
+    } else {
+      rawNumber = line;
+    }
+  }
+
+  // Strip spaces/dashes/parens from number, add + if missing
+  const digits = rawNumber.replace(/[\s\-().]/g, '');
+  const number = digits.startsWith('+') ? digits : '+' + digits;
+
+  return name ? `${name}, ${number}` : number;
+}
+
 function parseContacts(raw) {
   return raw.split('\n').map(line => {
-    line = line.trim();
-    if (!line) return null;
-    // Find phone number: last token that starts with + or is all digits (with optional dashes/spaces)
-    const match = line.match(/^(.*?)([+]?\d[\d\s\-().]{6,})$/);
-    if (match) {
-      const name = match[1].replace(/[,\s]+$/, '').trim();
-      const number = match[2].replace(/\s/g, '').trim();
-      return { name, number };
+    const clean = normalizeLine(line);
+    if (!clean) return null;
+    // Split "Name, +NUMBER" — find last ", +" to handle names with commas
+    const sep = clean.lastIndexOf(', +');
+    if (sep !== -1) {
+      return { name: clean.slice(0, sep).trim(), number: clean.slice(sep + 2).trim() };
     }
-    return { name: '', number: line };
-  }).filter(c => c && c.number.length > 3);
+    return { name: '', number: clean };
+  }).filter(c => c && c.number.length > 4);
 }
 
 function startSending() {
