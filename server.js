@@ -58,10 +58,27 @@ function initWhatsApp() {
 
   waClient = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wa_session' }),
+    authTimeoutMs: 120000,
     puppeteer: {
       executablePath: CHROME_PATH,
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote', '--disable-accelerated-2d-canvas', '--disable-audio-output'],
+      timeout: 120000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--disable-accelerated-2d-canvas',
+        '--disable-audio-output',
+        '--disable-extensions',
+        '--disable-default-apps',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--no-first-run',
+      ],
     },
   });
 
