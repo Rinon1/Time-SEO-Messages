@@ -1,5 +1,6 @@
 const ExcelJS = require('exceljs');
 const path = require('path');
+const fs = require('fs');
 
 const EXCEL_FILE = path.join(__dirname, 'messages-log.xlsx');
 
@@ -20,10 +21,12 @@ class ExcelSession {
 
   async init() {
     this.wb = new ExcelJS.Workbook();
+    // Only try to read if the file actually exists — exceljs can hang on missing files
+    if (!fs.existsSync(EXCEL_FILE)) return;
     try {
       await this.wb.xlsx.readFile(EXCEL_FILE);
     } catch {
-      // File doesn't exist yet — starts fresh
+      // Corrupt or locked — start fresh
     }
   }
 
