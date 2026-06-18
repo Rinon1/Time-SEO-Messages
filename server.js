@@ -159,7 +159,7 @@ async function startSending({ contacts, message, intervalMs }) {
   log('Checking send history...');
   excelSession = new ExcelSession();
   await excelSession.init();
-  const alreadyContacted = await excelSession.getPreviouslyContacted();
+  const alreadyContacted = excelSession.getPreviouslyContacted();
 
   // Build queue, marking already-contacted numbers
   const seen = new Set(); // deduplicate within this session
@@ -182,7 +182,7 @@ async function startSending({ contacts, message, intervalMs }) {
   }
 
   // Create new sheet in Excel
-  const sheetName = await excelSession.startSession();
+  const sheetName = excelSession.startSession();
   log(`Excel: sheet "${sheetName}" created in messages-log.xlsx`);
   log(`Starting: ${pending} to send, ${skipped} already contacted (${sendQueue.length} total)`, 'info');
 
@@ -221,7 +221,7 @@ async function processNext() {
     log(`↷ ${label} — already contacted before, skipping`, 'info');
     broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, name: item.name, reason: 'already_contacted' });
     if (excelSession) {
-      await excelSession.logRow({ name: item.name, number: item.number, status: 'Already contacted', platform: null, message: currentMessage });
+      excelSession.logRow({ name: item.name, number: item.number, status: 'Already contacted', platform: null, message: currentMessage });
     }
     processNext();
     return;
@@ -261,13 +261,13 @@ async function processNext() {
     log(`✓ Sent via ${platform} to ${label}`, 'success');
     broadcast({ type: 'item_sent', index: currentIndex - 1, number: item.number, name: item.name, platform });
     if (excelSession) {
-      await excelSession.logRow({ name: item.name, number: item.number, status: 'Sent', platform, message: currentMessage });
+      excelSession.logRow({ name: item.name, number: item.number, status: 'Sent', platform, message: currentMessage });
     }
   } else {
     log(`✗ ${label} — not on WhatsApp or Viber, skipped`, 'warn');
     broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, name: item.name, reason: 'not_found' });
     if (excelSession) {
-      await excelSession.logRow({ name: item.name, number: item.number, status: 'Skipped', platform: null, message: currentMessage });
+      excelSession.logRow({ name: item.name, number: item.number, status: 'Skipped', platform: null, message: currentMessage });
     }
   }
 

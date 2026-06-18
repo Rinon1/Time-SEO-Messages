@@ -7,8 +7,7 @@ const EXCEL_FILE = path.join(__dirname, 'messages-log.xlsx');
 function makeSessionName() {
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
-  const name = `${d.getDate()}-${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return name.slice(0, 31); // Excel sheet name limit
+  return `${d.getDate()}-${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`.slice(0, 31);
 }
 
 class ExcelSession {
@@ -17,43 +16,47 @@ class ExcelSession {
     this.sheet = null;
     this.sessionName = null;
     this.rowCount = 0;
+    this._writeChain = Promise.resolve(); // all writes queued here, never awaited by caller
+  }
+
+  // Queue a write without blocking the caller
+  _save() {
+    this._writeChain = this._writeChain.then(() =>
+      this.wb.xlsx.writeFile(EXCEL_FILE).catch(err =>
+        console.error('Excel write error (non-fatal):', err.message)
+      )
+    );
   }
 
   async init() {
     this.wb = new ExcelJS.Workbook();
-    // Only try to read if the file actually exists — exceljs can hang on missing files
-    if (!fs.existsSync(EXCEL_FILE)) return;
+    if (!fs.existsSync(EXCEL_FILE)) return; // no history yet
     try {
       await this.wb.xlsx.readFile(EXCEL_FILE);
     } catch {
-      // Corrupt or locked — start fresh
+      // corrupt or locked — start fresh
     }
   }
 
-  // Returns a Set of normalized phone numbers previously sent to successfully
-  async getPreviouslyContacted() {
-    if (!this.wb) await this.init();
+  // Returns Set of phone numbers we've previously sent to successfully
+  getPreviouslyContacted() {
     const contacted = new Set();
+    if (!this.wb) return contacted;
     this.wb.eachSheet(ws => {
       ws.eachRow((row, rowNum) => {
-        if (rowNum === 1) return; // skip header
-        const number = String(row.getCell(3).value || '').trim(); // col 3 = Phone Number
-        const status = String(row.getCell(4).value || '').trim(); // col 4 = Status
+        if (rowNum === 1) return;
+        const number = String(row.getCell(3).value || '').trim();
+        const status = String(row.getCell(4).value || '').trim();
         if (number && status === 'Sent') contacted.add(number);
       });
     });
-    return contacted;
+    return contacted; // sync — no await needed
   }
 
-  async startSession() {
-    if (!this.wb) await this.init();
-
+  startSession() {
     let name = makeSessionName();
-    // Ensure unique name if two sessions start in the same minute
     let suffix = 2;
-    while (this.wb.getWorksheet(name)) {
-      name = `${makeSessionName()} (${suffix++})`;
-    }
+    while (this.wb.getWorksheet(name)) name = `${makeSessionName()} (${suffix++})`;
     this.sessionName = name;
     this.rowCount = 0;
 
@@ -73,11 +76,11 @@ class ExcelSession {
     header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
     header.alignment = { vertical: 'middle' };
 
-    await this.wb.xlsx.writeFile(EXCEL_FILE);
+    this._save(); // write in background, don't block
     return name;
   }
 
-  async logRow({ name, number, status, platform, message }) {
+  logRow({ name, number, status, platform, message }) {
     if (!this.sheet) return;
     this.rowCount++;
 
@@ -91,18 +94,17 @@ class ExcelSession {
       time:     new Date().toLocaleString(),
     });
 
-    // Color-code the status cell
-    const cell = row.getCell('status');
     const colors = {
-      'Sent':              'FFC6EFCE', // green
-      'Skipped':           'FFFFEB9C', // yellow
-      'Already contacted': 'FFDCE6F1', // blue
+      'Sent':              'FFC6EFCE',
+      'Skipped':           'FFFFEB9C',
+      'Already contacted': 'FFDCE6F1',
     };
+    const cell = row.getCell('status');
     if (colors[status]) {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colors[status] } };
     }
 
-    await this.wb.xlsx.writeFile(EXCEL_FILE);
+    this._save(); // write in background, don't block
   }
 }
 
