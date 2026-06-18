@@ -1,19 +1,10 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
-const path = require('path');
-const puppeteer = require('puppeteer');
+const P = require('pino');
 const { ViberBot, normalizeNumber } = require('./viber-automation');
-
-// Resolve the Chrome binary path from our puppeteer install
-let CHROME_PATH;
-try {
-  CHROME_PATH = puppeteer.executablePath();
-} catch (e) {
-  CHROME_PATH = undefined;
-}
 
 const app = express();
 const server = http.createServer(app);
@@ -23,7 +14,7 @@ app.use(express.static('public'));
 app.use(express.json());
 
 // ─── State ───────────────────────────────────────────────────────────────────
-let waClient = null;
+let waSocket = null;
 let waReady = false;
 let viberBot = null;
 let viberReady = false;
@@ -49,82 +40,74 @@ function log(text, type = 'info') {
   broadcast({ type: 'log', text, logType: type });
 }
 
-// ─── WhatsApp ─────────────────────────────────────────────────────────────────
-function initWhatsApp() {
-  if (waClient) {
-    waClient.destroy().catch(() => {});
+// ─── WhatsApp (Baileys — no browser needed) ───────────────────────────────────
+async function initWhatsApp() {
+  if (waSocket) {
+    try { waSocket.end(); } catch (e) {}
+    waSocket = null;
   }
   waReady = false;
-
-  waClient = new Client({
-    authStrategy: new LocalAuth({ dataPath: './.wa_session' }),
-    authTimeoutMs: 120000,
-    puppeteer: {
-      executablePath: CHROME_PATH,
-      headless: true,
-      timeout: 120000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-zygote',
-        '--disable-accelerated-2d-canvas',
-        '--disable-audio-output',
-        '--disable-extensions',
-        '--disable-default-apps',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--metrics-recording-only',
-        '--mute-audio',
-        '--no-first-run',
-      ],
-    },
-  });
-
-  waClient.on('qr', async (qr) => {
-    log('WhatsApp: scan QR code with your phone');
-    const img = await qrcode.toDataURL(qr);
-    broadcast({ type: 'wa_qr', qr: img });
-  });
-
-  waClient.on('authenticated', () => {
-    log('WhatsApp: authenticated');
-    broadcast({ type: 'wa_authenticated' });
-  });
-
-  waClient.on('ready', () => {
-    waReady = true;
-    log('WhatsApp: ready ✓', 'success');
-    broadcast({ type: 'wa_ready' });
-  });
-
-  waClient.on('disconnected', (reason) => {
-    waReady = false;
-    log(`WhatsApp: disconnected (${reason})`, 'warn');
-    broadcast({ type: 'wa_disconnected' });
-  });
-
-  waClient.initialize().catch(err => {
-    log(`WhatsApp init error: ${err.message}`, 'error');
-  });
-
   broadcast({ type: 'wa_connecting' });
   log('WhatsApp: starting up, please wait...');
+
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState('.wa_session');
+
+    waSocket = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      logger: P({ level: 'silent' }),
+      browser: ['Auto Messenger', 'Chrome', '1.0.0'],
+      connectTimeoutMs: 60000,
+      retryRequestDelayMs: 500,
+    });
+
+    waSocket.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        const img = await qrcode.toDataURL(qr);
+        broadcast({ type: 'wa_qr', qr: img });
+        log('WhatsApp: scan QR code with your phone');
+      }
+
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        if (statusCode === DisconnectReason.loggedOut) {
+          waReady = false;
+          log('WhatsApp: logged out — reconnect to scan again', 'warn');
+          broadcast({ type: 'wa_disconnected' });
+        } else {
+          log('WhatsApp: connection closed, retrying...', 'warn');
+          setTimeout(() => initWhatsApp(), 4000);
+        }
+      } else if (connection === 'open') {
+        waReady = true;
+        log('WhatsApp: ready ✓', 'success');
+        broadcast({ type: 'wa_ready' });
+      }
+    });
+
+    waSocket.ev.on('creds.update', saveCreds);
+
+  } catch (err) {
+    log(`WhatsApp error: ${err.message}`, 'error');
+  }
 }
 
 async function waCheckNumber(number) {
   try {
-    const normalized = normalizeNumber(number).replace('+', '');
-    return await waClient.isRegisteredUser(normalized + '@c.us');
+    const jid = normalizeNumber(number).replace('+', '') + '@s.whatsapp.net';
+    const [result] = await waSocket.onWhatsApp(jid);
+    return result?.exists || false;
   } catch {
     return false;
   }
 }
 
 async function waSend(number, message) {
-  const normalized = normalizeNumber(number).replace('+', '');
-  await waClient.sendMessage(normalized + '@c.us', message);
+  const jid = normalizeNumber(number).replace('+', '') + '@s.whatsapp.net';
+  await waSocket.sendMessage(jid, { text: message });
 }
 
 // ─── Viber ────────────────────────────────────────────────────────────────────
@@ -233,11 +216,10 @@ async function processNext(message) {
     log(`✓ Sent via ${platform} to ${item.number}`, 'success');
     broadcast({ type: 'item_sent', index: currentIndex - 1, number: item.number, platform });
   } else {
-    log(`✗ Skipped ${item.number} — not on Viber or WhatsApp`, 'warn');
+    log(`✗ Skipped ${item.number} — not on WhatsApp`, 'warn');
     broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number });
   }
 
-  // Schedule next
   if (sendingActive && currentIndex < sendQueue.length) {
     broadcast({ type: 'next_in', seconds: sendIntervalMs / 1000 });
     sendTimeout = setTimeout(() => processNext(message), sendIntervalMs);
@@ -282,8 +264,6 @@ app.get('/api/status', (req, res) => {
 wss.on('connection', (ws) => {
   wsClients.add(ws);
   ws.on('close', () => wsClients.delete(ws));
-
-  // Send current status on connect
   ws.send(JSON.stringify({ type: 'status', waReady, viberReady, sendingActive }));
 });
 
