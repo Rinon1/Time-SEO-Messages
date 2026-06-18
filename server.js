@@ -1,10 +1,11 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const P = require('pino');
 const { ViberBot, normalizeNumber } = require('./viber-automation');
+const { ExcelSession, EXCEL_FILE } = require('./excel-tracker');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,6 +25,8 @@ let sendingActive = false;
 let sendTimeout = null;
 let sendIntervalMs = 10000;
 let currentIndex = 0;
+let excelSession = null;
+let currentMessage = '';
 
 // ─── WebSocket broadcast ─────────────────────────────────────────────────────
 const wsClients = new Set();
@@ -60,6 +63,8 @@ async function initWhatsApp() {
       auth: state,
       printQRInTerminal: false,
       logger: P({ level: 'silent' }),
+      browser: Browsers.windows('Chrome'),
+      syncFullHistory: false,
     });
 
     waSocket.ev.on('connection.update', async (update) => {
@@ -73,7 +78,6 @@ async function initWhatsApp() {
 
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
-        const reason = lastDisconnect?.error?.message || '';
         if (statusCode === DisconnectReason.loggedOut) {
           waReady = false;
           log('WhatsApp: logged out — reconnect to scan again', 'warn');
@@ -144,22 +148,48 @@ function initViber() {
 }
 
 // ─── Message Queue ────────────────────────────────────────────────────────────
-function startSending({ numbers, message, intervalMs }) {
+async function startSending({ numbers, message, intervalMs }) {
   if (sendingActive) return;
 
-  sendQueue = numbers
-    .map(n => n.trim())
-    .filter(n => n.length > 0)
-    .map(n => ({ number: n, status: 'pending' }));
-
   sendIntervalMs = intervalMs || 10000;
+  currentMessage = message;
+
+  // Load Excel history and find previously contacted numbers
+  log('Checking send history...');
+  excelSession = new ExcelSession();
+  await excelSession.init();
+  const alreadyContacted = await excelSession.getPreviouslyContacted();
+
+  // Build queue, marking already-contacted numbers
+  const rawNumbers = numbers.map(n => n.trim()).filter(n => n.length > 0);
+  const seen = new Set(); // deduplicate within this session
+  sendQueue = rawNumbers.map(raw => {
+    const n = normalizeNumber(raw);
+    if (seen.has(n)) return null; // duplicate in this batch
+    seen.add(n);
+    return {
+      number: n,
+      status: alreadyContacted.has(n) ? 'already_contacted' : 'pending',
+    };
+  }).filter(Boolean);
+
+  const pending = sendQueue.filter(i => i.status === 'pending').length;
+  const skipped = sendQueue.filter(i => i.status === 'already_contacted').length;
+
+  if (alreadyContacted.size > 0) {
+    log(`History: ${alreadyContacted.size} numbers previously contacted — ${skipped} in this list will be skipped`);
+  }
+
+  // Create new sheet in Excel
+  const sheetName = await excelSession.startSession();
+  log(`Excel: sheet "${sheetName}" created in messages-log.xlsx`);
+  log(`Starting: ${pending} to send, ${skipped} already contacted (${rawNumbers.length} total)`, 'info');
+
   currentIndex = 0;
   sendingActive = true;
+  broadcast({ type: 'sending_started', total: sendQueue.length, pending, skipped });
 
-  log(`Starting: ${sendQueue.length} numbers, ${sendIntervalMs / 1000}s between each`, 'info');
-  broadcast({ type: 'sending_started', total: sendQueue.length });
-
-  processNext(message);
+  processNext();
 }
 
 function stopSending() {
@@ -170,18 +200,29 @@ function stopSending() {
   log('Sending stopped.');
 }
 
-async function processNext(message) {
+async function processNext() {
   if (!sendingActive) return;
 
   if (currentIndex >= sendQueue.length) {
     sendingActive = false;
     broadcast({ type: 'sending_complete' });
-    log('All messages sent!', 'success');
+    log('All done!', 'success');
     return;
   }
 
   const item = sendQueue[currentIndex];
   currentIndex++;
+
+  // Already contacted — log to Excel and skip immediately, no delay
+  if (item.status === 'already_contacted') {
+    log(`↷ ${item.number} — already contacted before, skipping`, 'info');
+    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, reason: 'already_contacted' });
+    if (excelSession) {
+      await excelSession.logRow({ number: item.number, status: 'Already contacted', platform: null, message: currentMessage });
+    }
+    processNext();
+    return;
+  }
 
   broadcast({ type: 'sending_item', index: currentIndex - 1, number: item.number });
   log(`Processing ${item.number} (${currentIndex}/${sendQueue.length})...`);
@@ -192,7 +233,7 @@ async function processNext(message) {
   // 1. Try Viber first
   if (viberReady) {
     try {
-      sent = await viberBot.sendMessage(item.number, message);
+      sent = await viberBot.sendMessage(item.number, currentMessage);
       if (sent) platform = 'Viber';
     } catch (e) {
       log(`Viber error: ${e.message}`, 'warn');
@@ -204,7 +245,7 @@ async function processNext(message) {
     try {
       const onWA = await waCheckNumber(item.number);
       if (onWA) {
-        await waSend(item.number, message);
+        await waSend(item.number, currentMessage);
         sent = true;
         platform = 'WhatsApp';
       }
@@ -216,16 +257,28 @@ async function processNext(message) {
   if (sent) {
     log(`✓ Sent via ${platform} to ${item.number}`, 'success');
     broadcast({ type: 'item_sent', index: currentIndex - 1, number: item.number, platform });
+    if (excelSession) {
+      await excelSession.logRow({ number: item.number, status: 'Sent', platform, message: currentMessage });
+    }
   } else {
-    log(`✗ Skipped ${item.number} — not on WhatsApp`, 'warn');
-    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number });
+    log(`✗ ${item.number} — not on WhatsApp or Viber, skipped`, 'warn');
+    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, reason: 'not_found' });
+    if (excelSession) {
+      await excelSession.logRow({ number: item.number, status: 'Skipped', platform: null, message: currentMessage });
+    }
   }
 
   if (sendingActive && currentIndex < sendQueue.length) {
-    broadcast({ type: 'next_in', seconds: sendIntervalMs / 1000 });
-    sendTimeout = setTimeout(() => processNext(message), sendIntervalMs);
+    const nextItem = sendQueue[currentIndex];
+    // No delay before already-contacted items
+    if (nextItem && nextItem.status === 'already_contacted') {
+      processNext();
+    } else {
+      broadcast({ type: 'next_in', seconds: sendIntervalMs / 1000 });
+      sendTimeout = setTimeout(() => processNext(), sendIntervalMs);
+    }
   } else {
-    processNext(message);
+    processNext();
   }
 }
 
@@ -248,8 +301,9 @@ app.post('/api/start', (req, res) => {
   const { numbers, message, intervalSeconds } = req.body;
   if (!numbers || !message) return res.status(400).json({ error: 'numbers and message required' });
   if (!viberReady && !waReady) return res.status(400).json({ error: 'Connect at least one app first' });
-  startSending({ numbers, message, intervalMs: (intervalSeconds || 10) * 1000 });
+  if (sendingActive) return res.status(400).json({ error: 'Already sending' });
   res.json({ ok: true });
+  startSending({ numbers, message, intervalMs: (intervalSeconds || 10) * 1000 });
 });
 
 app.post('/api/stop', (req, res) => {
