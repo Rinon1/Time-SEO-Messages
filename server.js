@@ -148,7 +148,7 @@ function initViber() {
 }
 
 // ─── Message Queue ────────────────────────────────────────────────────────────
-async function startSending({ numbers, message, intervalMs }) {
+async function startSending({ contacts, message, intervalMs }) {
   if (sendingActive) return;
 
   sendIntervalMs = intervalMs || 10000;
@@ -161,13 +161,13 @@ async function startSending({ numbers, message, intervalMs }) {
   const alreadyContacted = await excelSession.getPreviouslyContacted();
 
   // Build queue, marking already-contacted numbers
-  const rawNumbers = numbers.map(n => n.trim()).filter(n => n.length > 0);
   const seen = new Set(); // deduplicate within this session
-  sendQueue = rawNumbers.map(raw => {
-    const n = normalizeNumber(raw);
+  sendQueue = contacts.map(({ name, number }) => {
+    const n = normalizeNumber(number);
     if (seen.has(n)) return null; // duplicate in this batch
     seen.add(n);
     return {
+      name: name || '',
       number: n,
       status: alreadyContacted.has(n) ? 'already_contacted' : 'pending',
     };
@@ -183,7 +183,7 @@ async function startSending({ numbers, message, intervalMs }) {
   // Create new sheet in Excel
   const sheetName = await excelSession.startSession();
   log(`Excel: sheet "${sheetName}" created in messages-log.xlsx`);
-  log(`Starting: ${pending} to send, ${skipped} already contacted (${rawNumbers.length} total)`, 'info');
+  log(`Starting: ${pending} to send, ${skipped} already contacted (${sendQueue.length} total)`, 'info');
 
   currentIndex = 0;
   sendingActive = true;
@@ -213,19 +213,21 @@ async function processNext() {
   const item = sendQueue[currentIndex];
   currentIndex++;
 
+  const label = item.name ? `${item.name} (${item.number})` : item.number;
+
   // Already contacted — log to Excel and skip immediately, no delay
   if (item.status === 'already_contacted') {
-    log(`↷ ${item.number} — already contacted before, skipping`, 'info');
-    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, reason: 'already_contacted' });
+    log(`↷ ${label} — already contacted before, skipping`, 'info');
+    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, name: item.name, reason: 'already_contacted' });
     if (excelSession) {
-      await excelSession.logRow({ number: item.number, status: 'Already contacted', platform: null, message: currentMessage });
+      await excelSession.logRow({ name: item.name, number: item.number, status: 'Already contacted', platform: null, message: currentMessage });
     }
     processNext();
     return;
   }
 
-  broadcast({ type: 'sending_item', index: currentIndex - 1, number: item.number });
-  log(`Processing ${item.number} (${currentIndex}/${sendQueue.length})...`);
+  broadcast({ type: 'sending_item', index: currentIndex - 1, number: item.number, name: item.name });
+  log(`Processing ${label} (${currentIndex}/${sendQueue.length})...`);
 
   let sent = false;
   let platform = null;
@@ -255,16 +257,16 @@ async function processNext() {
   }
 
   if (sent) {
-    log(`✓ Sent via ${platform} to ${item.number}`, 'success');
-    broadcast({ type: 'item_sent', index: currentIndex - 1, number: item.number, platform });
+    log(`✓ Sent via ${platform} to ${label}`, 'success');
+    broadcast({ type: 'item_sent', index: currentIndex - 1, number: item.number, name: item.name, platform });
     if (excelSession) {
-      await excelSession.logRow({ number: item.number, status: 'Sent', platform, message: currentMessage });
+      await excelSession.logRow({ name: item.name, number: item.number, status: 'Sent', platform, message: currentMessage });
     }
   } else {
-    log(`✗ ${item.number} — not on WhatsApp or Viber, skipped`, 'warn');
-    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, reason: 'not_found' });
+    log(`✗ ${label} — not on WhatsApp or Viber, skipped`, 'warn');
+    broadcast({ type: 'item_skipped', index: currentIndex - 1, number: item.number, name: item.name, reason: 'not_found' });
     if (excelSession) {
-      await excelSession.logRow({ number: item.number, status: 'Skipped', platform: null, message: currentMessage });
+      await excelSession.logRow({ name: item.name, number: item.number, status: 'Skipped', platform: null, message: currentMessage });
     }
   }
 
@@ -298,12 +300,12 @@ app.post('/api/connect-viber', (req, res) => {
 });
 
 app.post('/api/start', (req, res) => {
-  const { numbers, message, intervalSeconds } = req.body;
-  if (!numbers || !message) return res.status(400).json({ error: 'numbers and message required' });
+  const { contacts, message, intervalSeconds } = req.body;
+  if (!contacts || !contacts.length || !message) return res.status(400).json({ error: 'contacts and message required' });
   if (!viberReady && !waReady) return res.status(400).json({ error: 'Connect at least one app first' });
   if (sendingActive) return res.status(400).json({ error: 'Already sending' });
   res.json({ ok: true });
-  startSending({ numbers, message, intervalMs: (intervalSeconds || 10) * 1000 });
+  startSending({ contacts, message, intervalMs: (intervalSeconds || 10) * 1000 });
 });
 
 app.post('/api/stop', (req, res) => {

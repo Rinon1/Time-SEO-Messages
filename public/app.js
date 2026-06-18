@@ -67,12 +67,14 @@ function handle(msg) {
       updateChip(msg.index, msg.number, 'sending');
       break;
 
-    case 'item_sent':
+    case 'item_sent': {
       done++;
       updateProgress();
-      const chipClass = msg.platform === 'Viber' ? 'chip-sent-viber' : 'chip-sent-wa';
-      updateChip(msg.index, `${msg.number} (${msg.platform})`, chipClass.replace('chip-', ''));
+      const label = msg.name ? `${msg.name} (${msg.platform})` : `${msg.number} (${msg.platform})`;
+      const chipClass = msg.platform === 'Viber' ? 'sent-viber' : 'sent-wa';
+      updateChip(msg.index, label, chipClass);
       break;
+    }
 
     case 'item_skipped':
       done++;
@@ -116,32 +118,43 @@ function connectViber() {
   document.getElementById('viber-connect-btn').disabled = true;
 }
 
-function startSending() {
-  const numbers = document.getElementById('numbers-input').value
-    .split('\n')
-    .map(n => n.trim())
-    .filter(n => n.length > 3);
+function parseContacts(raw) {
+  return raw.split('\n').map(line => {
+    line = line.trim();
+    if (!line) return null;
+    // Find phone number: last token that starts with + or is all digits (with optional dashes/spaces)
+    const match = line.match(/^(.*?)([+]?\d[\d\s\-().]{6,})$/);
+    if (match) {
+      const name = match[1].replace(/[,\s]+$/, '').trim();
+      const number = match[2].replace(/\s/g, '').trim();
+      return { name, number };
+    }
+    return { name: '', number: line };
+  }).filter(c => c && c.number.length > 3);
+}
 
+function startSending() {
+  const contacts = parseContacts(document.getElementById('numbers-input').value);
   const message = document.getElementById('message-input').value.trim();
   const intervalSeconds = parseInt(document.getElementById('delay-input').value) || 10;
 
-  if (!numbers.length) { alert('Please enter at least one phone number.'); return; }
+  if (!contacts.length) { alert('Please enter at least one contact.'); return; }
   if (!message) { alert('Please type a message.'); return; }
 
   // Clear results grid
   document.getElementById('results-grid').innerHTML = '';
-  numbers.forEach((num, i) => {
+  contacts.forEach((c, i) => {
     const chip = document.createElement('div');
     chip.className = 'result-chip';
     chip.id = `chip-${i}`;
-    chip.textContent = num;
+    chip.textContent = c.name ? `${c.name} (${c.number})` : c.number;
     document.getElementById('results-grid').appendChild(chip);
   });
 
   fetch('/api/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ numbers, message, intervalSeconds }),
+    body: JSON.stringify({ contacts, message, intervalSeconds }),
   }).then(r => r.json()).then(d => {
     if (d.error) alert(d.error);
   });

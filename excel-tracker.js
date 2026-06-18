@@ -34,8 +34,8 @@ class ExcelSession {
     this.wb.eachSheet(ws => {
       ws.eachRow((row, rowNum) => {
         if (rowNum === 1) return; // skip header
-        const number = String(row.getCell(2).value || '').trim();
-        const status = String(row.getCell(3).value || '').trim();
+        const number = String(row.getCell(3).value || '').trim(); // col 3 = Phone Number
+        const status = String(row.getCell(4).value || '').trim(); // col 4 = Status
         if (number && status === 'Sent') contacted.add(number);
       });
     });
@@ -56,12 +56,13 @@ class ExcelSession {
 
     this.sheet = this.wb.addWorksheet(name);
     this.sheet.columns = [
-      { header: '#',            key: 'index',    width: 6  },
-      { header: 'Phone Number', key: 'number',   width: 20 },
-      { header: 'Status',       key: 'status',   width: 18 },
-      { header: 'Platform',     key: 'platform', width: 14 },
-      { header: 'Message',      key: 'message',  width: 50 },
-      { header: 'Time',         key: 'time',     width: 22 },
+      { header: '#',             key: 'index',    width: 6  },
+      { header: 'Business Name', key: 'name',     width: 28 },
+      { header: 'Phone Number',  key: 'number',   width: 20 },
+      { header: 'Status',        key: 'status',   width: 18 },
+      { header: 'Platform',      key: 'platform', width: 14 },
+      { header: 'Message',       key: 'message',  width: 50 },
+      { header: 'Time',          key: 'time',     width: 22 },
     ];
 
     const header = this.sheet.getRow(1);
@@ -73,12 +74,13 @@ class ExcelSession {
     return name;
   }
 
-  async logRow({ number, status, platform, message }) {
+  async logRow({ name, number, status, platform, message }) {
     if (!this.sheet) return;
     this.rowCount++;
 
     const row = this.sheet.addRow({
       index:    this.rowCount,
+      name:     name || '',
       number,
       status,
       platform: platform || '—',
