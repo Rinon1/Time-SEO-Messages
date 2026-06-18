@@ -1,5 +1,6 @@
 // ─── WebSocket ────────────────────────────────────────────────────────────────
-const ws = new WebSocket(`ws://${location.host}`);
+const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(`${wsProtocol}//${location.host}`);
 let total = 0;
 let done = 0;
 let countdownInterval = null;
