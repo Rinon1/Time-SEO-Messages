@@ -61,7 +61,7 @@ function initWhatsApp() {
     puppeteer: {
       executablePath: CHROME_PATH,
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote', '--disable-accelerated-2d-canvas', '--disable-audio-output'],
     },
   });
 
@@ -236,6 +236,10 @@ app.post('/api/connect-whatsapp', (req, res) => {
 });
 
 app.post('/api/connect-viber', (req, res) => {
+  if (process.env.PORT) {
+    log('Viber is not supported on cloud servers — it only works when running the app locally on your PC. Use WhatsApp instead.', 'warn');
+    return res.json({ ok: false });
+  }
   initViber();
   res.json({ ok: true });
 });
